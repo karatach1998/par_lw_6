@@ -36,22 +36,23 @@ void device_kernel(float* a, int m, int n)
     int bx = blockIdx.x;
     int by = blockIdx.y;
 
-    // if (tx < n && ty < m) {
+    if (tx < n && ty < m) {
         float tmp = a[tx * n + ty];
         __syncthreads();
-        a[ty * n + tx] = a[tx * n + ty];
-    // }
+        a[ty * m + tx] = a[tx * n + ty];
+    }
 }
 
 
 void run_using_gpu(float* mat, unsigned m, unsigned n)
 {
+    printf("[%u %u]\n", m, n);
     float* dev;
 
     cudaMalloc((void**)&dev, sizeof (float[m * n]));
     cudaMemcpy(dev, mat, sizeof (float[m * n]), cudaMemcpyHostToDevice);
 
-    device_kernel<<<dim3(1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE)>>>(dev, m, n);
+    device_kernel<<<dim3(m * n / 32 * 32), dim3(32, 32)>>>(dev, m, n);
 
     cudaMemcpy(mat, dev, sizeof (float[m * n]), cudaMemcpyDeviceToHost);
     cudaFree(dev);
@@ -63,7 +64,7 @@ void run_using_cpu(float* mat, unsigned m, unsigned n)
 #pragma omp parallel for
     for (unsigned i = 0; i < m; ++i) {
 #pragma omp parallel for
-        for (unsigned j = i; j < n; ++j) {
+        for (unsigned j = i + 1; j < n; ++j) {
             float tmp = mat[i * n + j];
             mat[i * n + j] = mat[j * m + i];
             mat[j * m + i] = tmp;
@@ -125,7 +126,10 @@ int main(int argc, char* argv[])
     }
     double stop = omp_get_wtime();
 
-    mat_out(m, n, n);
+    // mat_out(m, n, n);
+    for (unsigned i = 0; i < 5; ++i)
+        printf("%f ", m[i * n]);
+    printf("\n");
     printf("** Execution time: %f\n", stop - start);
 
     return 0;
