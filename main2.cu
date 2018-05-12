@@ -3,11 +3,45 @@
 #include <argp.h>
 
 
-// __global__
-// void kernel(float* data)
-// {
-//     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-// }
+#define BLOCK_SIZE 16
+
+
+void gen_mat(float* mat, unsigned m, unsigned n)
+{
+    for (unsigned i = 0; i < m; ++i) {
+        for (unsigned j = 0; j < n; ++j) {
+            mat[i * n + j] = i * n + j;
+        }
+    }
+}
+
+
+__global__
+void device_kernel(float* a, float* b, int m, int n)
+{
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+
+    float tmp = a[ty * n + tx];
+    __syncthreads();
+    a[ty * n + tx] = b[tx * n + ty];
+    b[tx * n + ty] = tmp;
+}
+
+
+void run_using_gpu(float* mat, unsigned m, unsigned n)
+{
+    device_kernel<<<dim3(), dim(BLOCK_SIZE, BLOCK_SIZE)>>>(mat, mat, m, n);
+}
+
+
+void run_using_cpu(float* mat, unsigned m, unsigned n)
+{
+
+}
+
 
 
 enum executor_type { DEVICE, HOST };
@@ -51,9 +85,15 @@ int main(int argc, char* argv[])
     argp_parse(&argp, argc, argv, 0, 0, &config);
 
     unsigned n = config.n;
-    float m[n * n];
+    float* m = (float*) malloc(sizeof float[n * n]);
 
-    printf("%i %u\n", config.executor, config.n);
+    gen_mat(m, n, n);
+
+    switch (config.executor)
+    {
+        case DEVICE: run_using_gpu(m, n, n); break;
+        case HOST:   run_using_cpu(m, n, n); break;
+    }
 
     return 0;
 }
