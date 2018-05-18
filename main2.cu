@@ -74,10 +74,12 @@ void run_using_cpu(float* mat, unsigned m, unsigned n)
 
 
 enum executor_type { DEVICE, HOST };
+enum flags { PRINT_RESULT = 0x1 }
 
 struct config
 {
     enum executor_type executor;
+    enum flags flags;
     unsigned n;
 };
 
@@ -89,9 +91,16 @@ int parse_arg(int key, char* arg, struct argp_state* state)
 
     switch (key)
     {
-        case 'c': config->executor = HOST;   break;
-        case 'g': config->executor = DEVICE; break;
-        case 'n': config->n = atoi(arg);     break;
+        case 'c': config->executor = HOST;      break;
+        case 'g': config->executor = DEVICE;    break;
+        case 'p': config->flags = PRINT_RESULT; break;
+        case 'n': config->n = atoi(arg);        break;
+        case ARGP_END_KEY:
+                  if (config->n == 0) {
+                      argp_error(state, "Matrix dimestions must be specified.");
+                      fflush(stdout);
+                      return -1;
+                  }
     }
     return 0;
 }
@@ -100,7 +109,8 @@ int parse_arg(int key, char* arg, struct argp_state* state)
 struct argp_option options[] = {
     {"cpu", 'c', 0, 0, "Execute using CPU."},
     {"gpu", 'g', 0, 0, "Execute using GPU."},
-    {NULL, 'n', "NUM", 0, "Specifies an matrix order."},
+    {NULL,  'p', 0, 0, "Print result matrix."},
+    {NULL,  'n', "NUM", 0, "Specifies an matrix order."},
     { 0 }
 };
 
@@ -126,10 +136,8 @@ int main(int argc, char* argv[])
     }
     double stop = omp_get_wtime();
 
-    // mat_out(m, n, n);
-    for (unsigned i = 0; i < 5; ++i)
-        printf("%f ", m[i * n]);
-    printf("\n");
+    if (config.flags & PRINT_RESULT)
+        mat_out(mat, m, n);
     printf("** Execution time: %f\n", stop - start);
 
     return 0;
