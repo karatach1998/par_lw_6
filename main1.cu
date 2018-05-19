@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include <argp.h>
 
 
@@ -10,14 +11,71 @@ enum { H, A, B };
 
 __constant__ float cs[3]; // constants
 
+
+__device__
+void f(float x)
+{
+    float arg = fabsf((cs[A] * x + cs[B]) * x * x - cs[A] * cs[B]);
+    return powf(sinf(arg), 3) / sqrtf(arg);
+}
+
+
 __global__
 void kernel(float* data)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     float x = cs[H] * idx;
 
-    float arg = fabsf((cs[A] * x + cs[B]) * x * x - cs[A] * cs[B]);
-    data[idx] = powf(sinf(arg), 2) / sqrtf(arg);
+    data[idx] = f(x);
+}
+
+
+void run_using_gpu(float* a, unsigned k)
+{
+    float* dev;
+
+    cs[H] = N / k;
+    cs[A] = N;
+    cs[B] = N * 2;
+
+    float k_expanded = (k + 511) / 512 * 512;
+    cudaMalloc((void**)&dev, sizeof (float[k_expanded]));
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start, 0);
+    kernel<<<(k + 511) / 512, 512>>>(dev);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    cudaMemcpy(a, dev, sizeof (float[k]), cudaMemcpyDeviceToHost);
+    cudaFree(dev);
+}
+
+
+__host__
+float f(float x)
+{
+    float arg = fabs((a * x + b) * x * x - a * b);
+    return powf(sinf(arg), 3) / sqrtf(arg);
+}
+
+
+void run_using_cpu(float* a, unsigned k)
+{
+    const float h = N / k;
+    const float a = N;
+    const float b = N * 2;
+
+#pragma omp parallel for
+    for (unsigned i = 0; i < k; ++i) {
+        a[i] = f(h * x);
+    }
 }
 
 
@@ -33,7 +91,7 @@ enum config_flags
 
 struct config
 {
-    enum execution_side execution_side;
+    enum execution_side executor;
     unsigned k;
 };
 
@@ -41,12 +99,16 @@ struct config
 static int parse_arg(int key, char* arg, struct argp_state* state)
 {
     struct config* config = (struct config*) state->input;
+
     switch (key)
     {
-        case 'c': config->execution_side = HOST; break;
-        case 'g': config->execution_side = DEVICE; break;
-        case 'k': config->k = atoi(arg); break;
-        // default: argp_failure(state, 0, EINVAL, "Invalid argument."); return EINVAL;
+        case 'c': config->executor = HOST;      break;
+        case 'g': config->executor = DEVICE;    break;
+        case 'k': config->k = atoi(arg);        break;
+        case ARGP_END_KEY:
+                  if (config.k == 0) {
+                      argp_error(state, "K must be specified.")
+                  }
     }
     return 0;
 }
@@ -55,7 +117,7 @@ static int parse_arg(int key, char* arg, struct argp_state* state)
 struct argp_option options[] = {
     {"cpu", 'c', 0, 0, "Execute on CPU."},
     {"gpu", 'g', 0, 0, "Execute on GPU."},
-    {0, 'k', "N", 0, "K-value."},
+    {NULL,  'k', "num", 0, "K-value."},
     { 0 }
 };
 
@@ -68,41 +130,13 @@ int main(int argc, char* argv[])
 
     argp_parse(&argp, argc, argv, 0, 0, &config);
 
-    // printf("%u %u\n", config.local_constants)
+    float* a = (float*) malloc(sizeof (float[config.k]));
 
-    float a[config.k];
-    float local_constants[3];
-
-    local_constants[H] = (float) N / config.k;
-    local_constants[A] = (float) N;
-    local_constants[B] = (float) N * 2;
-    cudaMemcpyToSymbol(cs, local_constants, sizeof local_constants);
-
-    printf("%f %f %f\n", local_constants[0], local_constants[1], local_constants[2]);
-
-    float* dev_a = NULL;
-    cudaEvent_t start, stop;
-    float elapsed_time;
-
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaMalloc((void**) &dev_a, sizeof a);
-
-    cudaEventRecord(start);
-    kernel<<<dim3(1, 1), dim3(512, 1)>>>(dev_a);
-    cudaEventRecord(stop);
-    cudaEventElapsedTime(&elapsed_time, start, stop);
-
-    cudaMemcpy(a, dev_a, sizeof a, cudaMemcpyDeviceToHost);
-    cudaFree(dev_a);
-
-    printf("Elapsed time: %f\n", elapsed_time);
-    // if (config.flags & PRINT_FLAG) {
-        printf("*** Computation results ***\n");
-        for (unsigned i = 0; i < config.k; ++i) {
-            printf("f(%f) = %f\n", local_constants[H] * i, a[i]);
-        }
-    // }
+    switch (config.executor)
+    {
+        case DEVICE: run_using_gpu(a, config.k);
+        case HOST:   run_using_cpu(a, config.k);
+    }
 
     return 0;
 }
