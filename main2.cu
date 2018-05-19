@@ -5,11 +5,14 @@
 #include <argp.h>
 
 
+double g_elapsedTime;
+
+
 void mat_out(float* mat, unsigned m, unsigned n)
 {
     for (unsigned i = 0; i < m; ++i) {
         for (unsigned j = 0; j < n; ++j) {
-            printf("%7.3f ", mat[i * n + j]);
+            printf("%7.3f ", (double) mat[i * n + j]);
         }
         printf("\n");
     }
@@ -47,7 +50,13 @@ void transpose_optimized(float* a, int n)
 
 void run_using_gpu(float* mat, unsigned m, unsigned n)
 {
-    printf("[%u %u]\n", m, n);
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	
+	cudaEventRecord(start, 0);
+
+	// --- Evaluation start ---
     float* dev;
 
     assert(m == n);
@@ -58,15 +67,26 @@ void run_using_gpu(float* mat, unsigned m, unsigned n)
 
     uint3 blocks = dim3(m / TILE_SIZE, n / TILE_SIZE);
     uint3 threads = dim3(TILE_SIZE, TILE_SIZE);
-    transpose_optimized<<<blocks, threads>>>(dev, m, n);
+    transpose_optimized<<<blocks, threads>>>(dev, n);
 
     cudaMemcpy(mat, dev, sizeof (float[m * n]), cudaMemcpyDeviceToHost);
     cudaFree(dev);
+	// --- Evaluation stop ---
+
+	cudaEventRecord(stop, 0);
+	cudaEventSynchronize(stop);
+	
+	float milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, start, stop);
+	g_elapsedTime = milliseconds / 1000;
 }
 
 
 void run_using_cpu(float* mat, unsigned m, unsigned n)
 {
+	double start = omp_get_wtime();
+
+	// --- Evaluation start ---
 #pragma omp parallel for collapse(2)
     for (unsigned i = 0; i < m; ++i) {
         for (unsigned j = i + 1; j < n; ++j) {
@@ -75,16 +95,20 @@ void run_using_cpu(float* mat, unsigned m, unsigned n)
             mat[j * m + i] = tmp;
         }
     }
+	// --- Evaluation stop ---
+
+	double stop = omp_get_wtime();
+	g_elapsedTime = stop - start;
 }
 
 
 enum executor_type { DEVICE, HOST };
-enum flags { PRINT_RESULT = 0x1 }
+enum flags { PRINT_RESULT = 0x1 };
 
 struct config
 {
     enum executor_type executor;
-    enum flags flags;
+    unsigned flags;
     unsigned n;
 };
 
@@ -96,11 +120,11 @@ int parse_arg(int key, char* arg, struct argp_state* state)
 
     switch (key)
     {
-        case 'c': config->executor = HOST;      break;
-        case 'g': config->executor = DEVICE;    break;
-        case 'p': config->flags = PRINT_RESULT; break;
-        case 'n': config->n = atoi(arg);        break;
-        case ARGP_END_KEY:
+        case 'c': config->executor = HOST;       break;
+        case 'g': config->executor = DEVICE;     break;
+        case 'p': config->flags |= PRINT_RESULT; break;
+        case 'n': config->n = atoi(arg);         break;
+        case ARGP_KEY_END:
                   if (config->n == 0) {
                       argp_error(state, "Matrix dimestions must be specified.");
                       fflush(stdout);
@@ -129,21 +153,20 @@ int main(int argc, char* argv[])
     argp_parse(&argp, argc, argv, 0, 0, &config);
 
     unsigned n = config.n;
+    unsigned m = config.n;
     float* mat = (float*) malloc(sizeof (float[n * n]));
 
     gen_mat(mat, n, n);
 
-    double start = omp_get_wtime();
     switch (config.executor)
     {
-        case DEVICE: run_using_gpu(mat, n, n); break;
-        case HOST:   run_using_cpu(mat, n, n); break;
+        case DEVICE: run_using_gpu(mat, m, n); break;
+        case HOST:   run_using_cpu(mat, m, n); break;
     }
-    double stop = omp_get_wtime();
 
     if (config.flags & PRINT_RESULT)
         mat_out(mat, m, n);
-    printf("** Execution time: %f\n", stop - start);
+    printf("** Execution time: %f\n", g_elapsedTime);
 
     return 0;
 }
