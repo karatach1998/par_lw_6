@@ -4,7 +4,7 @@ Move time measurement result to global variable.
 Try to add for loop which allows to make block size 32x8 and compute 4 elements at once.
 Add #define BLOCK_ROWS 8
 -
-Add code to kernel that perform checking for matrix with size that aren't integram multiplies of 32 on a side.
+Add code to kernel that perform checking for matrix with size that aren't integral multiplies of 32 on a side.
 -
 Run kernel in follow manner:
     uint3 blocks = dim3((m + TILE_SIZE - 1) / TILE_SIZE, (n + TILE_SIZE - 1) / TILE_SIZE);

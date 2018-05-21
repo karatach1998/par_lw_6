@@ -29,22 +29,28 @@ void gen_mat(float* mat, unsigned m, unsigned n)
 }
 
 
-#define TILE_SIZE 16
+#define TILE_SIZE 32
+#define BLOCK_ROWS 4
 
 
 __global__
-void transpose_optimized(float* a, int n)
+void transpose_optimized(float* a, int m, int n)
 {
     __shared__ float tile[TILE_SIZE][TILE_SIZE];
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int x = blockIdx.x * TILE_SIZE + threadIdx.x;
+    int y = blockIdx.y * TILE_SIZE + threadIdx.y;
 
-    tile[threadIdx.y][threadIdx.x] = a[y * n + x];
+    for (int j = 0; j < TILE_SIZE; j += BLOCK_ROWS)
+        tile[threadIdx.y + j][threadIdx.x] = a[(y + j) * n + x];
 
     __syncthreads();
 
-    a[y * n + x] = tile[threadIdx.x][threadIdx.y];
+    x = blockIdx.y * TILE_SIZE + threadIdx.x;
+    y = blockIdx.x * TILE_SIZE + threadIdx.y;
+
+    for (int j = 0; j < TILE_SIZE; j += BLOCK_ROWS)
+        a[(y + j) * n + x] = tile[threadIdx.x][threadIdx.y + j];
 }
 
 
@@ -53,7 +59,7 @@ void run_using_gpu(float* mat, unsigned m, unsigned n)
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
-	
+
 	cudaEventRecord(start, 0);
 
 	// --- Evaluation start ---
@@ -62,12 +68,14 @@ void run_using_gpu(float* mat, unsigned m, unsigned n)
     assert(m == n);
     assert(m % TILE_SIZE == 0 && n % TILE_SIZE == 0);
 
+	printf("[%u %u]\n", m, n);
+
     cudaMalloc((void**)&dev, sizeof (float[m * n]));
     cudaMemcpy(dev, mat, sizeof (float[m * n]), cudaMemcpyHostToDevice);
 
     uint3 blocks = dim3(m / TILE_SIZE, n / TILE_SIZE);
-    uint3 threads = dim3(TILE_SIZE, TILE_SIZE);
-    transpose_optimized<<<blocks, threads>>>(dev, n);
+    uint3 threads = dim3(TILE_SIZE, BLOCK_ROWS);
+    transpose_optimized<<<blocks, threads>>>(dev, m, n);
 
     cudaMemcpy(mat, dev, sizeof (float[m * n]), cudaMemcpyDeviceToHost);
     cudaFree(dev);
@@ -75,7 +83,7 @@ void run_using_gpu(float* mat, unsigned m, unsigned n)
 
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
-	
+
 	float milliseconds = 0;
 	cudaEventElapsedTime(&milliseconds, start, stop);
 	g_elapsedTime = milliseconds / 1000;
@@ -154,9 +162,9 @@ int main(int argc, char* argv[])
 
     unsigned n = config.n;
     unsigned m = config.n;
-    float* mat = (float*) malloc(sizeof (float[n * n]));
+    float* mat = (float*) malloc(sizeof (float[m * n]));
 
-    gen_mat(mat, n, n);
+    gen_mat(mat, m, n);
 
     switch (config.executor)
     {
@@ -165,7 +173,7 @@ int main(int argc, char* argv[])
     }
 
     if (config.flags & PRINT_RESULT)
-        mat_out(mat, m, n);
+        mat_out(mat, n, m);
     printf("** Execution time: %f\n", g_elapsedTime);
 
     return 0;
