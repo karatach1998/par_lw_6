@@ -68,8 +68,6 @@ void run_using_gpu(float* mat, unsigned m, unsigned n)
     assert(m == n);
     assert(m % TILE_SIZE == 0 && n % TILE_SIZE == 0);
 
-	printf("[%u %u]\n", m, n);
-
     cudaMalloc((void**)&dev, sizeof (float[m * n]));
     cudaMemcpy(dev, mat, sizeof (float[m * n]), cudaMemcpyHostToDevice);
 
