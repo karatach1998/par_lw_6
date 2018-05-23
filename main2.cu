@@ -36,7 +36,7 @@ void gen_mat(float* mat, unsigned m, unsigned n)
 __global__
 void transpose_optimized(float* a, int m, int n)
 {
-    __shared__ float tile[TILE_SIZE][TILE_SIZE];
+    __shared__ float tile[TILE_SIZE][TILE_SIZE + 1]; // Bank conflict optimization.
 
     int x = blockIdx.x * TILE_SIZE + threadIdx.x;
     int y = blockIdx.y * TILE_SIZE + threadIdx.y;
